@@ -1,0 +1,4 @@
+name: "Aqara Ceiling Light T1M"
+packageKey: "aqara-t1m-driver"
+permissions:
+  zigbee: {}

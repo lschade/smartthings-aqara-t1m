@@ -1,0 +1,28 @@
+name: aqara-t1m-profile
+components:
+  # Endpoint 0x01 - tunable white main panel (2700K-6500K)
+  - id: main
+    label: Main Light
+    capabilities:
+      - id: switch
+        version: 1
+      - id: switchLevel
+        version: 1
+      - id: colorTemperature
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Light
+  # Endpoint 0x02 - RGB ambient ring
+  - id: outerRing
+    label: Outer Ambient Ring
+    capabilities:
+      - id: switch
+        version: 1
+      - id: switchLevel
+        version: 1
+      - id: colorControl
+        version: 1
+    categories:
+      - name: Light
