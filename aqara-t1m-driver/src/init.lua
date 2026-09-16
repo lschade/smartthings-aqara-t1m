@@ -7,19 +7,33 @@
 --   * Endpoint 0x01 -> SmartThings component "main"      (tunable white panel)
 --   * Endpoint 0x02 -> SmartThings component "outerRing" (RGB ambient ring)
 --
--- The RGB ring only accepts CIE XY color (MoveToColor), not Hue/Saturation
--- (zigbee2mqtt drives it with color modes ["xy"]). The SmartThings default
--- colorControl handler uses Hue/Saturation, which the ring ignores, so color
--- control must be implemented explicitly here.
+-- Custom handling in this driver:
+--   * RGB ring color only accepts CIE XY (MoveToColor), not Hue/Saturation.
+--   * Brightness must be sent with transition time 0, otherwise the firmware
+--     ramps and the app slider jitters.
+--   * Power-on behavior (state after a power outage) lives in Aqara's private
+--     cluster 0xFCC0 / attribute 0x0517 and is exposed per endpoint as the
+--     custom capability oceanfuture23754.poweronstate.
 
 local capabilities = require "st.capabilities"
 local ZigbeeDriver = require "st.zigbee"
 local defaults = require "st.zigbee.defaults"
 local clusters = require "st.zigbee.zcl.clusters"
+local cluster_base = require "st.zigbee.cluster_base"
+local data_types = require "st.zigbee.data_types"
 local log = require "log"
 
 local MAIN_ENDPOINT = 0x01
 local RING_ENDPOINT = 0x02
+
+-- Aqara private cluster / manufacturer code
+local LUMI_MFG_CODE = 0x115F
+local POWER_ON_CLUSTER_ID = 0xFCC0
+local POWER_ON_STATE_ATTR_ID = 0x0517
+local POWER_ON_CODES = { on = 0x00, previous = 0x01, off = 0x02 }
+local POWER_ON_STATES = { [0x00] = "on", [0x01] = "previous", [0x02] = "off" }
+
+local power_on_state = capabilities["oceanfuture23754.poweronstate"]
 
 -- Route a SmartThings UI component to its Zigbee endpoint.
 local function component_to_endpoint(device, component_id)
@@ -44,6 +58,18 @@ local function device_init(driver, device)
   device:set_endpoint_to_component_fn(endpoint_to_component)
 end
 
+local function read_power_on_state(device)
+  for _, ep in ipairs({ MAIN_ENDPOINT, RING_ENDPOINT }) do
+    device:send(cluster_base.read_manufacturer_specific_attribute(
+      device, POWER_ON_CLUSTER_ID, POWER_ON_STATE_ATTR_ID, LUMI_MFG_CODE):to_endpoint(ep))
+  end
+end
+
+local function do_refresh(driver, device)
+  device:refresh()
+  read_power_on_state(device)
+end
+
 local function do_configure(driver, device)
   -- Standard binding + reporting configuration for the device's endpoints.
   device:configure()
@@ -52,6 +78,10 @@ local function do_configure(driver, device)
   -- correct (T1M panel is ~2703-6536 K but we use the reported values).
   device:send(clusters.ColorControl.attributes.ColorTempPhysicalMinMireds:read(device):to_endpoint(MAIN_ENDPOINT))
   device:send(clusters.ColorControl.attributes.ColorTempPhysicalMaxMireds:read(device):to_endpoint(MAIN_ENDPOINT))
+
+  -- Read the current power-on behavior for both endpoints so the app shows the
+  -- value that is actually stored on the device.
+  read_power_on_state(device)
 
   log.info("Aqara T1M configured (main ep 0x01, ring ep 0x02)")
 end
@@ -160,6 +190,32 @@ local function set_saturation(driver, device, command)
   send_xy_color(device, component, hue, command.args.saturation or 0)
 end
 
+-- Report the device's stored power-on behavior (0xFCC0/0x0517).
+local function power_on_state_attr_handler(driver, device, value, zb_rx)
+  local state = POWER_ON_STATES[value.value]
+  if state == nil then
+    log.warn(string.format("Unknown power-on state value: %s", tostring(value.value)))
+    return
+  end
+  local ep = zb_rx.address_header.src_endpoint.value
+  device:emit_event_for_endpoint(ep, power_on_state.powerOnState(state))
+end
+
+-- Set the power-on behavior for the component's endpoint.
+local function set_power_on_state(driver, device, command)
+  local state = command.args.state
+  local code = POWER_ON_CODES[state]
+  if code == nil then
+    log.warn(string.format("Unknown power-on state: %s", tostring(state)))
+    return
+  end
+
+  local ep = component_to_endpoint(device, command.component or "main")
+  device:send(cluster_base.write_manufacturer_specific_attribute(
+    device, POWER_ON_CLUSTER_ID, POWER_ON_STATE_ATTR_ID, LUMI_MFG_CODE, data_types.Uint8, code):to_endpoint(ep))
+  device:emit_event_for_endpoint(ep, power_on_state.powerOnState(state))
+end
+
 local aqara_t1m_driver_template = {
   supported_capabilities = {
     capabilities.switch,
@@ -169,6 +225,12 @@ local aqara_t1m_driver_template = {
     capabilities.refresh,
   },
   capability_handlers = {
+    [capabilities.refresh.ID] = {
+      [capabilities.refresh.commands.refresh.NAME] = do_refresh,
+    },
+    [power_on_state.ID] = {
+      [power_on_state.commands.setPowerOnState.NAME] = set_power_on_state,
+    },
     [capabilities.switchLevel.ID] = {
       [capabilities.switchLevel.commands.setLevel.NAME] = set_level,
     },
@@ -176,6 +238,13 @@ local aqara_t1m_driver_template = {
       [capabilities.colorControl.commands.setColor.NAME] = set_color,
       [capabilities.colorControl.commands.setHue.NAME] = set_hue,
       [capabilities.colorControl.commands.setSaturation.NAME] = set_saturation,
+    },
+  },
+  zigbee_handlers = {
+    attr = {
+      [POWER_ON_CLUSTER_ID] = {
+        [POWER_ON_STATE_ATTR_ID] = power_on_state_attr_handler,
+      },
     },
   },
   lifecycle_handlers = {
