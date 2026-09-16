@@ -1,0 +1,14 @@
+zigbeeManufacturer:
+  # Aqara/Lumi devices report the manufacturer name as "LUMI" on most firmware,
+  # but some units/firmware revisions report "Aqara". Register both so pairing
+  # always matches this driver.
+  - id: "LUMI/lumi.light.acn032"
+    deviceLabel: "Aqara Ceiling Light T1M"
+    manufacturer: "LUMI"
+    model: "lumi.light.acn032"
+    deviceProfileName: aqara-t1m-profile
+  - id: "Aqara/lumi.light.acn032"
+    deviceLabel: "Aqara Ceiling Light T1M"
+    manufacturer: "Aqara"
+    model: "lumi.light.acn032"
+    deviceProfileName: aqara-t1m-profile
