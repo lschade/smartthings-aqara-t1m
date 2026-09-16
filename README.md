@@ -8,57 +8,13 @@ SmartThings device with two independently controllable lights:
 | `main`      | Tunable white panel    | `0x01`          | switch, switchLevel, colorTemperature |
 | `outerRing` | RGB ambient ring       | `0x02`          | switch, switchLevel, colorControl     |
 
-## Verified device facts
+## Device facts
 
 - Zigbee model: `lumi.light.acn032`
-- Manufacturer name: `LUMI` (some firmware reports `Aqara`)
+- Manufacturer name: `LUMI` on most firmware, `Aqara` on some (both are fingerprinted)
 - Mains-powered Zigbee **router** (no battery), 40 W, panel 2700-6500 K
-- Endpoint `1` = white panel (On/Off `0x0006`, Level `0x0008`, Color `0x0300`)
-- Endpoint `2` = RGB ring (On/Off `0x0006`, Level `0x0008`, Color `0x0300`)
-
-Sources: zigbee-herdsman-converters (`src/devices/lumi.ts`, model `CL-L02D`,
-endpoints `{white: 1, rgb: 2}`), ZHA device handler
-`zhaquirks/xiaomi/aqara/light_acn.py` (quirk replaces endpoint 1 and 2), and
-Zigbee2MQTT device notes.
-
-> **Note on Thread:** some write-ups claim the T1M ships in Thread mode and
-> must be switched to Zigbee first. The unit tested here is **Zigbee-only** —
-> it has no Thread radio — so no protocol switch is needed. If your unit does
-> expose a protocol setting in the Aqara Home app, set it to **Zigbee**; either
-> way no Aqara hub is required after pairing.
-
-## Review of the proposed dev plan
-
-The architecture (two components, endpoint `0x01`/`0x02` mapping, cluster
-mapping, profile and fingerprint values) is **correct**. A few implementation
-details were wrong and are fixed in this driver:
-
-1. **`component_to_endpoint` / `endpoint_to_component` are not driver-template
-   fields.** They must be registered at runtime in the `init` lifecycle
-   handler:
-   ```lua
-   device:set_component_to_endpoint_fn(component_to_endpoint)
-   device:set_endpoint_to_component_fn(endpoint_to_component)
-   ```
-   Passing them as keys on `driver_template` silently does nothing, so every
-   command would go to endpoint `0x01` and the ring would be uncontrollable.
-
-2. **The custom `device_init` reporting block should be removed.** It only sent
-   `configure_reporting` (no binding, so reports would never arrive) and ran on
-   `init` instead of `doConfigure`. The library's default `do_configure`
-   already binds and configures reporting for the device's endpoints. The
-   driver now overrides `doConfigure` only to call `device:configure()` and to
-   read the panel's physical color-temperature range.
-
-3. **Manufacturer string.** Fingerprinting only on `LUMI` can miss units whose
-   firmware reports `Aqara`; both are now registered.
-
-4. **`config.yml` / profile / fingerprint structure** were already valid
-   (`config.yml`, `permissions.zigbee`, `deviceProfileName` matching the
-   profile `name`, `categories: Light`).
-
-5. **Thread-mode caveat** was missing from the plan; in practice this device
-   is Zigbee-only (see note above).
+- Endpoint `0x01` = white panel, endpoint `0x02` = RGB ring
+- Both endpoints expose On/Off `0x0006`, Level `0x0008`, Color Control `0x0300`
 
 ## Layout
 
@@ -72,28 +28,41 @@ aqara-t1m-driver/
     └── init.lua
 ```
 
-## Package & install
+## Installation
 
-Requires the [SmartThings CLI](https://github.com/SmartThingsCommunity/smartthings-cli).
+### Option 1 - From the shared channel (no tooling required)
+
+1. Open the channel invitation link and sign in with your Samsung account:
+   <https://bestow-regional.api.smartthings.com/invite/akMXbwVwgAlb>
+2. Select your hub and **enroll** it in the channel.
+3. Install the driver from the channel (the app will also auto-update it when
+   new versions are published).
+
+### Option 2 - Build and deploy from source (developers)
+
+Requires the [SmartThings CLI](https://github.com/SmartThingsCommunity/smartthings-cli)
+and a SmartThings hub.
 
 ```bash
-# 1. Package the driver
-smartthings edge:drivers:package ./aqara-t1m-driver
+# Build, upload and assign to a channel in one step
+smartthings edge:drivers:package --channel <CHANNEL_ID> ./aqara-t1m-driver
 
-# 2. Create a channel (once) and assign the driver to it
-smartthings edge:channels:create
-smartthings edge:channels:assign
-
-# 3. Enroll your hub in the channel and install the driver
-smartthings edge:channels:enroll
-smartthings edge:drivers:install
-
-# 4. Watch logs while pairing
-smartthings edge:drivers:logcat --hub-address <HUB_IP>
+# Enroll your hub in the channel and install
+smartthings edge:channels:enroll <HUB_ID> --channel <CHANNEL_ID>
+smartthings edge:drivers:install --hub <HUB_ID> --channel <CHANNEL_ID> <DRIVER_ID>
 ```
 
-Then put the T1M into pairing mode (power-cycle it 5x, ~1 s on/off each time)
-and add it with *Scan nearby* in the SmartThings app.
+First time only: create a channel with `smartthings edge:channels:create`.
+
+### Pairing the light
+
+Put the T1M into pairing mode by power-cycling it **5x** (~1 s on/off each
+time), then add it via *Scan nearby* in the SmartThings app. To watch the
+driver logs while pairing:
+
+```bash
+smartthings edge:drivers:logcat <DRIVER_ID> --hub-address <HUB_IP>
+```
 
 ## Behavior notes
 
@@ -106,8 +75,7 @@ and add it with *Scan nearby* in the SmartThings app.
   (XY), not Hue/Saturation. The SmartThings default `colorControl` handler
   sends Hue/Saturation, so this driver overrides `setColor`/`setHue`/
   `setSaturation` to convert SmartThings hue/saturation to XY and send
-  `MoveToColor` to endpoint `0x02`. If the color wheel still has no effect on
-  some firmware, the next fallback is Aqara's private cluster `0xFCC0`.
+  `MoveToColor` to endpoint `0x02`.
 
 ## Known limitations / next steps
 
