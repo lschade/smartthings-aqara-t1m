@@ -12,6 +12,8 @@ components:
         version: 1
       - id: refresh
         version: 1
+      - id: oceanfuture23754.poweronstate
+        version: 1
     categories:
       - name: Light
   # Endpoint 0x02 - RGB ambient ring
@@ -23,6 +25,8 @@ components:
       - id: switchLevel
         version: 1
       - id: colorControl
+        version: 1
+      - id: oceanfuture23754.poweronstate
         version: 1
     categories:
       - name: Light

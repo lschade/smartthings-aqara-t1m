@@ -66,6 +66,11 @@ smartthings edge:drivers:logcat <DRIVER_ID> --hub-address <HUB_IP>
 
 ## Behavior notes
 
+- **Power-on behavior (per light).** Exposed for both `main` and `outerRing` via
+  the custom capability `oceanfuture23754.poweronstate` (labels: On / Last
+  state / Off). It maps to Aqara's private cluster `0xFCC0` attribute `0x0517`.
+  The driver reads the value stored on the device during configure/refresh, so
+  the app shows the real current setting, and writes the attribute when changed.
 - **Instant brightness changes.** The T1M firmware ramps brightness over
   ~1.5 s and reports intermediate levels, which made the app slider jump back
   and step down. The driver overrides `switchLevel.setLevel` to send
